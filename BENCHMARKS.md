@@ -9,8 +9,8 @@
 
 | Command | Requests/sec |
 |---|---|
-| SET: 17755.68 requests per second |
-| GET: 17488.63 requests per second |
+| SET | 17755.68 requests per second |
+| GET | 17488.63 requests per second |
 
 ## Notes
 
