@@ -1,4 +1,6 @@
-package main
+// Package resp implements the Redis Serialization Protocol (RESP):
+// reading commands off a connection and writing replies back.
+package resp
 
 import (
 	"bufio"
@@ -15,12 +17,14 @@ const (
 	ARRAY   = '*'
 )
 
+// Value represents one RESP value — a client command (always an Array
+// of Bulk strings) or a reply we send back.
 type Value struct {
-	typ   string
-	str   string
-	num   int
-	bulk  string
-	array []Value
+	Typ   string
+	Str   string
+	Num   int
+	Bulk  string
+	Array []Value
 }
 
 type Resp struct {
@@ -58,9 +62,10 @@ func (r *Resp) readInteger() (x int, n int, err error) {
 	return int(i64), n, nil
 }
 
+// Read reads one RESP value. Clients always send commands as arrays
+// of bulk strings, so those are the only two types we parse here.
 func (r *Resp) Read() (Value, error) {
 	_type, err := r.reader.ReadByte()
-
 	if err != nil {
 		return Value{}, err
 	}
@@ -78,24 +83,20 @@ func (r *Resp) Read() (Value, error) {
 
 func (r *Resp) readArray() (Value, error) {
 	v := Value{}
-	v.typ = "array"
+	v.Typ = "array"
 
-	// read length of array
-	len, _, err := r.readInteger()
+	length, _, err := r.readInteger()
 	if err != nil {
 		return v, err
 	}
 
-	// foreach line, parse and read the value
-	v.array = make([]Value, 0)
-	for i := 0; i < len; i++ {
+	v.Array = make([]Value, 0)
+	for i := 0; i < length; i++ {
 		val, err := r.Read()
 		if err != nil {
 			return v, err
 		}
-
-		// append parsed value to array
-		v.array = append(v.array, val)
+		v.Array = append(v.Array, val)
 	}
 
 	return v, nil
@@ -103,29 +104,27 @@ func (r *Resp) readArray() (Value, error) {
 
 func (r *Resp) readBulk() (Value, error) {
 	v := Value{}
+	v.Typ = "bulk"
 
-	v.typ = "bulk"
-
-	len, _, err := r.readInteger()
+	length, _, err := r.readInteger()
 	if err != nil {
 		return v, err
 	}
 
-	bulk := make([]byte, len)
+	bulk := make([]byte, length)
+	if _, err := io.ReadFull(r.reader, bulk); err != nil {
+		return v, err
+	}
+	v.Bulk = string(bulk)
 
-	r.reader.Read(bulk)
-
-	v.bulk = string(bulk)
-
-	// Read the trailing CRLF
-	r.readLine()
+	r.readLine() // trailing CRLF
 
 	return v, nil
 }
 
-// Marshal Value to bytes
+// Marshal serializes a Value to the bytes we send back to the client.
 func (v Value) Marshal() []byte {
-	switch v.typ {
+	switch v.Typ {
 	case "array":
 		return v.marshalArray()
 	case "bulk":
@@ -133,9 +132,11 @@ func (v Value) Marshal() []byte {
 	case "string":
 		return v.marshalString()
 	case "null":
-		return v.marshallNull()
+		return v.marshalNull()
 	case "error":
-		return v.marshallError()
+		return v.marshalError()
+	case "integer":
+		return v.marshalInteger()
 	default:
 		return []byte{}
 	}
@@ -144,48 +145,54 @@ func (v Value) Marshal() []byte {
 func (v Value) marshalString() []byte {
 	var bytes []byte
 	bytes = append(bytes, STRING)
-	bytes = append(bytes, v.str...)
+	bytes = append(bytes, v.Str...)
 	bytes = append(bytes, '\r', '\n')
-
 	return bytes
 }
 
 func (v Value) marshalBulk() []byte {
 	var bytes []byte
 	bytes = append(bytes, BULK)
-	bytes = append(bytes, strconv.Itoa(len(v.bulk))...)
+	bytes = append(bytes, strconv.Itoa(len(v.Bulk))...)
 	bytes = append(bytes, '\r', '\n')
-	bytes = append(bytes, v.bulk...)
+	bytes = append(bytes, v.Bulk...)
 	bytes = append(bytes, '\r', '\n')
-
 	return bytes
 }
 
 func (v Value) marshalArray() []byte {
-	len := len(v.array)
+	length := len(v.Array)
 	var bytes []byte
 	bytes = append(bytes, ARRAY)
-	bytes = append(bytes, strconv.Itoa(len)...)
+	bytes = append(bytes, strconv.Itoa(length)...)
 	bytes = append(bytes, '\r', '\n')
-
-	for i := 0; i < len; i++ {
-		bytes = append(bytes, v.array[i].Marshal()...)
+	for i := 0; i < length; i++ {
+		bytes = append(bytes, v.Array[i].Marshal()...)
 	}
-
 	return bytes
 }
 
-func (v Value) marshallError() []byte {
+func (v Value) marshalError() []byte {
 	var bytes []byte
 	bytes = append(bytes, ERROR)
-	bytes = append(bytes, v.str...)
+	bytes = append(bytes, v.Str...)
 	bytes = append(bytes, '\r', '\n')
-
 	return bytes
 }
 
-func (v Value) marshallNull() []byte {
+func (v Value) marshalNull() []byte {
 	return []byte("$-1\r\n")
+}
+
+// marshalInteger is new: your original never replied with RESP
+// integers. We need it soon for DEL/EXISTS/INCR, which must return
+// :N\r\n, not a bulk string.
+func (v Value) marshalInteger() []byte {
+	var bytes []byte
+	bytes = append(bytes, INTEGER)
+	bytes = append(bytes, strconv.Itoa(v.Num)...)
+	bytes = append(bytes, '\r', '\n')
+	return bytes
 }
 
 type Writer struct {
@@ -197,12 +204,6 @@ func NewWriter(w io.Writer) *Writer {
 }
 
 func (w *Writer) Write(v Value) error {
-	var bytes = v.Marshal()
-
-	_, err := w.writer.Write(bytes)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	_, err := w.writer.Write(v.Marshal())
+	return err
 }

@@ -15,23 +15,59 @@ A lightweight Redis-like server built from scratch in Go to learn RESP parsing, 
   - `HGETALL hash`
 - Append Only File (AOF) persistence (`database.aof`) with replay on startup
 
-## Project Structure
+## Project Map
 
-- `main.go` — TCP server bootstrap, request loop, AOF replay/write
-- `handler.go` — command handlers and in-memory data stores
-- `resp.go` — RESP reader/writer and marshaling logic
-- `aof.go` — append-only file read/write and periodic sync
-
-## Prerequisites
-
-- Go 1.27.1 (as defined in `go.mod`)
+```text
+GoRedis/
+├── go.mod
+├── go.sum
+├── README.md
+├── BENCHMARKS.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── cmd/
+│   ├── goredis/
+│   │   └── main.go
+│   └── bench/
+│       └── main.go
+├── internal/
+│   ├── resp/
+│   │   ├── resp.go
+│   │   └── resp_test.go
+│   ├── store/
+│   │   ├── store.go
+│   │   └── store_test.go
+│   ├── aof/
+│   │   └── aof.go
+│   ├── server/
+│   │   └── server.go
+│   ├── raft/
+│   │   ├── types.go
+│   │   ├── storage.go
+│   │   ├── node.go
+│   │   ├── election.go
+│   │   ├── replication.go
+│   │   ├── apply.go
+│   │   └── raft_test.go
+│   ├── simnet/
+│   │   └── simnet.go
+│   ├── fsm/
+│   │   └── fsm.go
+│   ├── cluster/
+│   │   ├── node.go
+│   │   └── server.go
+│   └── transport/
+│       └── tcp.go
+└── data/
+```
 
 ## Run the Server
 
 From the repository root:
 
 ```bash
-go run .
+go run ./cmd/goredis
 ```
 
 The server listens on `:6379`.
