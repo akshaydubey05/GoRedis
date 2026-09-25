@@ -2,9 +2,8 @@
 
 ## Baseline — single node, AOF persistence
 
-**Date:** <fill in today's date>
-**Machine:** <your CPU, e.g. "Intel i5-XXXX" or "Ryzen 5 XXXX">, <RAM amount>
-**Go version:** <output of `go version`>
+**Date:** 25-09-2026
+**Machine:** Inte; i7-13th gen, 16gb Ram
 **Command:** `redis-benchmark -p 6379 -t set,get -n 100000 -c 50 -q`
 
 | Command | Requests/sec |
