@@ -1,3 +1,6 @@
+![CI](https://github.com/akshaydubey05/GoRedis/actions/workflows/ci.yml/badge.svg)
+
+
 # GoRedis
 
 A lightweight Redis-like server built from scratch in Go to learn RESP parsing, command handling, and append-only persistence.
