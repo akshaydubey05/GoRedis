@@ -1,6 +1,8 @@
 package raft_test
 
 import (
+	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -243,4 +245,210 @@ func TestPartitionMinorityCannotCommit(t *testing.T) {
 		t.Fatal("new leader refused propose after healing")
 	}
 	c.waitApplied(idx2, "SET progress 1", 3)
+}
+
+// ---------- chaos testing helpers ----------
+
+// randomFault does one random destructive thing to the cluster: crash
+// a node, restart a dead one, partition the network, or heal it.
+func (c *cluster) randomFault(rng *rand.Rand) {
+	c.mu.Lock()
+	n := len(c.nodes)
+	c.mu.Unlock()
+
+	switch rng.Intn(4) {
+	case 0:
+		i := rng.Intn(n)
+		if !c.net.IsDown(i) {
+			c.crash(i)
+		}
+	case 1:
+		i := rng.Intn(n)
+		if c.net.IsDown(i) {
+			c.restart(i)
+		}
+	case 2:
+		a, b := rng.Intn(n), rng.Intn(n)
+		if a != b {
+			c.net.Cut(a, b)
+		}
+	case 3:
+		c.net.HealAll()
+	}
+}
+
+// clientOp is one record of "a client tried to do something", used
+// both for our own agreement check and for the Porcupine history.
+type clientOp struct {
+	clientID  int
+	value     string
+	callTime  time.Time
+	returnAt  time.Time // zero means it never returned (timed out)
+	committed bool
+}
+
+// runClients starts n goroutines proposing unique SET commands
+// against whichever node currently looks like the leader, for the
+// given duration, recording every attempt.
+func (c *cluster) runClients(numClients int, dur time.Duration) []clientOp {
+	var mu sync.Mutex
+	var ops []clientOp
+	deadline := time.Now().Add(dur)
+	var wg sync.WaitGroup
+
+	for cid := 0; cid < numClients; cid++ {
+		wg.Add(1)
+		go func(cid int) {
+			defer wg.Done()
+			i := 0
+			for time.Now().Before(deadline) {
+				i++
+				value := fmt.Sprintf("c%d-v%d", cid, i)
+				callTime := time.Now()
+
+				// Find some node that currently claims to be leader;
+				// if none, just wait a bit and retry.
+				c.mu.Lock()
+				var leaderNode *raft.Node
+				for idx, n := range c.nodes {
+					if c.net.IsDown(idx) {
+						continue
+					}
+					if _, role, _ := n.State(); role == raft.Leader {
+						leaderNode = n
+						break
+					}
+				}
+				c.mu.Unlock()
+
+				if leaderNode == nil {
+					time.Sleep(20 * time.Millisecond)
+					continue
+				}
+
+				_, term, ok := leaderNode.Propose([]byte(value))
+				if !ok {
+					time.Sleep(20 * time.Millisecond)
+					continue
+				}
+
+				// Poll briefly to see if it actually got applied
+				// anywhere, so we can mark returnAt. This is a test
+				// helper, not production code, so simple polling is fine.
+				applied := false
+				for wait := 0; wait < 40; wait++ {
+					time.Sleep(20 * time.Millisecond)
+					c.mu.Lock()
+					for _, m := range c.applied {
+						for _, v := range m {
+							if v == value {
+								applied = true
+							}
+						}
+					}
+					c.mu.Unlock()
+					if applied {
+						break
+					}
+				}
+
+				op := clientOp{clientID: cid, value: value, callTime: callTime, committed: applied}
+				if applied {
+					op.returnAt = time.Now()
+				}
+				_ = term
+
+				mu.Lock()
+				ops = append(ops, op)
+				mu.Unlock()
+
+				time.Sleep(10 * time.Millisecond)
+			}
+		}(cid)
+	}
+	wg.Wait()
+	return ops
+}
+
+// checkAgreement verifies that for every log index, every node which
+// applied that index applied the SAME command. This is Raft's core
+// safety property, checked directly against what actually happened.
+func (c *cluster) checkAgreement(t *testing.T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	byIndex := map[int]string{}
+	for _, m := range c.applied {
+		for idx, cmd := range m {
+			if existing, ok := byIndex[idx]; ok {
+				if existing != cmd {
+					t.Fatalf("SAFETY VIOLATION: index %d applied as %q on one node, %q on another", idx, existing, cmd)
+				}
+			} else {
+				byIndex[idx] = cmd
+			}
+		}
+	}
+}
+
+// checkAcked verifies every op we marked "committed" during the
+// chaos run is actually present somewhere in the final applied log —
+// i.e. nothing we told a client succeeded was secretly lost.
+func (c *cluster) checkAcked(t *testing.T, ops []clientOp) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	present := map[string]bool{}
+	for _, m := range c.applied {
+		for _, cmd := range m {
+			present[cmd] = true
+		}
+	}
+
+	for _, op := range ops {
+		if op.committed && !present[op.value] {
+			t.Fatalf("LOST WRITE: client was told %q committed, but it's missing from every node's applied log", op.value)
+		}
+	}
+}
+
+
+func TestChaos(t *testing.T) {
+	c := newCluster(t, 5) // 5 nodes: tolerates 2 simultaneous failures
+	defer c.shutdown()
+
+	rng := rand.New(rand.NewSource(42)) // fixed seed = reproducible failures
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(300 * time.Millisecond):
+				c.randomFault(rng)
+			}
+		}
+	}()
+
+	ops := c.runClients(3, 8*time.Second)
+	close(stop)
+	wg.Wait()
+
+	// Heal everything and give the cluster time to settle before
+	// making any final assertions.
+	c.net.HealAll()
+	for i := 0; i < 5; i++ {
+		if c.net.IsDown(i) {
+			c.restart(i)
+		}
+	}
+	c.waitForLeader()
+	time.Sleep(2 * time.Second)
+
+	c.checkAgreement(t)
+	c.checkAcked(t, ops)
 }
