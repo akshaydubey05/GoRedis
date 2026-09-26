@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #F2ECDC;
+  --ink: #16140F;
+  --amber: #E8A33D;
+  --orange: #D9481F;
+  --green: #4B7F52;
+  --red: #B23A2E;
+  --violet: #6B4E9E;
+  --line: #16140F;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Space Grotesk', sans-serif;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+  background-color: var(--paper);
+  background-blend-mode: normal;
+  opacity: 1;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.05;
+  z-index: 0;
+}
+
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+.brutal-box {
+  background: #fff;
+  border: 3px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.brutal-box-sm {
+  border: 2.5px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.brutal-btn {
+  border: 2.5px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.brutal-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.brutal-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.scanlines > * {
+  position: relative;
+  z-index: 1;
+}
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(22, 20, 15, 0.06) 0px,
+    rgba(22, 20, 15, 0.06) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--paper); }
+::-webkit-scrollbar-thumb { background: var(--ink); border: 2px solid var(--paper); }
+
+@keyframes blink { 50% { opacity: 0; } }
+.cursor-blink { animation: blink 1s step-end infinite; }
+
+@keyframes stampIn {
+  0% { transform: scale(1.4) rotate(-8deg); opacity: 0; }
+  100% { transform: scale(1) rotate(-4deg); opacity: 1; }
+}
+.stamp { animation: stampIn 0.25s ease-out; }
+
+.terminal-input {
+  color: #4B7F52 !important;
+  -webkit-text-fill-color: #4B7F52 !important;
+  opacity: 1 !important;
+  caret-color: #4B7F52 !important;
+}
