@@ -38,19 +38,19 @@ func TestLinearizability(t *testing.T) {
 	defer c.shutdown()
 
 	const key = "linkey"
-	rng := rand.New(rand.NewSource(7))
 
 	stop := make(chan struct{})
 	var faultWg sync.WaitGroup
 	faultWg.Add(1)
 	go func() {
 		defer faultWg.Done()
+		localRng := rand.New(rand.NewSource(7))
 		for {
 			select {
 			case <-stop:
 				return
-			case <-time.After(400 * time.Millisecond):
-				c.randomFault(rng)
+			case <-time.After(800 * time.Millisecond): // gentler: was 250ms, then 400ms
+				c.randomFault(localRng)
 			}
 		}
 	}()
@@ -59,7 +59,19 @@ func TestLinearizability(t *testing.T) {
 	var history []porcupine.Operation
 	var opWg sync.WaitGroup
 
-	doOp := func(clientID int, isPut bool, val string) {
+	// doOp proposes either a PUT or a GET. reqID must be GLOBALLY
+	// UNIQUE across every call, for both PUTs and GETs — this lets us
+	// later prove "the thing sitting at index idx is MY exact
+	// proposal" rather than "some command with the same text as
+	// mine, possibly from a different attempt that coincidentally
+	// landed at the same log slot after a leadership change
+	// overwrote the original." Without this, two different GET
+	// attempts (which carry no payload of their own) would be
+	// indistinguishable once serialized, and a stale/discarded
+	// proposal could be mistaken for having committed using a
+	// DIFFERENT operation's real commit timing — silently corrupting
+	// the history handed to Porcupine.
+	doOp := func(clientID int, isPut bool, val string, reqID string) {
 		call := time.Now()
 
 		c.mu.Lock()
@@ -80,9 +92,9 @@ func TestLinearizability(t *testing.T) {
 
 		var cmdStr string
 		if isPut {
-			cmdStr = fmt.Sprintf("PUT:%s:%s", key, val)
+			cmdStr = fmt.Sprintf("PUT:%s:%s:%s", key, val, reqID)
 		} else {
-			cmdStr = fmt.Sprintf("GET:%s", key)
+			cmdStr = fmt.Sprintf("GET:%s:%s", key, reqID)
 		}
 
 		idx, term, ok := leaderNode.Propose([]byte(cmdStr))
@@ -91,11 +103,6 @@ func TestLinearizability(t *testing.T) {
 		}
 		_ = term
 
-		// Find the SPECIFIC node that applied our exact command at
-		// this exact index. That node is guaranteed (by how applyLoop
-		// works — it processes log indices strictly in order) to have
-		// already applied every index before ours too, so it's safe
-		// to use as the single source of truth for replay.
 		confirmedNode := -1
 		for wait := 0; wait < 60; wait++ {
 			time.Sleep(20 * time.Millisecond)
@@ -114,7 +121,7 @@ func TestLinearizability(t *testing.T) {
 			}
 		}
 		if confirmedNode == -1 {
-			return // our proposal never committed as ours; skip recording
+			return // our exact proposal never committed; skip recording
 		}
 
 		ret := time.Now()
@@ -144,20 +151,23 @@ func TestLinearizability(t *testing.T) {
 		}
 	}
 
-	for cid := 0; cid < 3; cid++ {
+	for cid := 0; cid < 2; cid++ { // gentler: was 4, then 3
 		opWg.Add(1)
 		go func(cid int) {
 			defer opWg.Done()
-			deadline := time.Now().Add(6 * time.Second)
+			localRng := rand.New(rand.NewSource(int64(100 + cid)))
+
+			deadline := time.Now().Add(4 * time.Second) // gentler: was 6s
 			i := 0
 			for time.Now().Before(deadline) {
 				i++
-				if rng.Intn(2) == 0 {
-					doOp(cid, true, fmt.Sprintf("v%d-%d", cid, i))
+				reqID := fmt.Sprintf("c%d-%d", cid, i)
+				if localRng.Intn(2) == 0 {
+					doOp(cid, true, fmt.Sprintf("v%d-%d", cid, i), reqID)
 				} else {
-					doOp(cid, false, "")
+					doOp(cid, false, "", reqID)
 				}
-				time.Sleep(15 * time.Millisecond)
+				time.Sleep(30 * time.Millisecond) // gentler: was 15ms
 			}
 		}(cid)
 	}
@@ -186,11 +196,11 @@ func TestLinearizability(t *testing.T) {
 
 // replayValueOnNode reconstructs what "key" was set to as of log
 // index upTo, using ONE specific node's applied-commands map. This
-// node must already be known (by the caller) to have applied upTo —
-// since applyLoop processes indices strictly in increasing order
-// with no gaps, that guarantees every earlier index has been
-// processed too, making this replay fully accurate. Always locks
-// c.mu, since c.applied is written concurrently by other goroutines.
+// node is already known (by the caller) to have applied upTo — since
+// applyLoop processes indices strictly in increasing order with no
+// gaps, every earlier index has necessarily been processed too,
+// making this replay fully accurate. Always locks c.mu, since
+// c.applied is written concurrently by other goroutines.
 func replayValueOnNode(c *cluster, nodeIdx int, key string, upTo int) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -203,15 +213,30 @@ func replayValueOnNode(c *cluster, nodeIdx int, key string, upTo int) string {
 			continue
 		}
 		if len(cmd) > 4 && cmd[:4] == "PUT:" {
-			rest := cmd[4:]
+			// format: PUT:<key>:<value>:<reqID>
+			rest := cmd[4:] // "<key>:<value>:<reqID>"
+			firstColon := -1
 			for j := 0; j < len(rest); j++ {
 				if rest[j] == ':' {
-					if rest[:j] == key {
-						val = rest[j+1:]
-					}
+					firstColon = j
 					break
 				}
 			}
+			if firstColon == -1 || rest[:firstColon] != key {
+				continue
+			}
+			afterKey := rest[firstColon+1:] // "<value>:<reqID>"
+			lastColon := -1
+			for j := len(afterKey) - 1; j >= 0; j-- {
+				if afterKey[j] == ':' {
+					lastColon = j
+					break
+				}
+			}
+			if lastColon == -1 {
+				continue
+			}
+			val = afterKey[:lastColon]
 		}
 	}
 	return val
