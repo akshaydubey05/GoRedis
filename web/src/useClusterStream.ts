@@ -21,7 +21,7 @@ export const API = (window as any).API_URL || "http://localhost:8080";
 export function useClusterStream() {
   const [state, setState] = useState<ClusterState>({ nodes: [], leaderId: -1 });
   const [online, setOnline] = useState(false);
-  const [prevRoles, setPrevRoles] = useState<Record<number, string>>({});
+  const [, setPrevRoles] = useState<Record<number, string>>({});
   const [events, setEvents] = useState<string[]>([]);
 
   useEffect(() => {
