@@ -1,7 +1,7 @@
+import { useState } from "react";
 import { useClusterStream, API } from "./useClusterStream";
 import { NodeCard } from "./NodeCard";
 import { Terminal } from "./Terminal";
-import { useState } from "react";
 import { GitBranch, RefreshCw, Split, Zap } from "lucide-react";
 
 async function post(path: string) {
@@ -59,27 +59,132 @@ export default function App() {
           </div>
         </div>
 
+        {/* Intro / explainer section */}
+        <div className="brutal-box p-5 mb-6 bg-white">
+          <div className="flex items-start gap-3 mb-3">
+            <span className="text-3xl leading-none">👋</span>
+
+            <div>
+              <h2 className="text-lg font-bold uppercase mb-1">
+                What is this?
+              </h2>
+
+              <p className="text-sm leading-relaxed">
+                This is a distributed, fault-tolerant key-value database — like
+                Redis, but spread across multiple servers that agree on every
+                write using the <b>Raft consensus algorithm</b>, implemented
+                entirely from scratch in Go. If one server crashes, the others
+                automatically elect a new leader and keep serving requests with{" "}
+                <b>zero data loss</b>. This is the same core idea behind systems
+                like etcd (which powers Kubernetes), CockroachDB, and Consul.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            {/* Problem */}
+            <div className="border-2 border-black p-3 bg-[#F2ECDC]">
+              <div className="mono text-[10px] uppercase tracking-widest mb-1 text-black/60">
+                The problem
+              </div>
+
+              <p className="text-xs leading-snug">
+                A single database server is a single point of failure. If it
+                crashes, your app goes down and you might lose data.
+              </p>
+            </div>
+
+            {/* Fix */}
+            <div className="border-2 border-black p-3 bg-[#F2ECDC]">
+              <div className="mono text-[10px] uppercase tracking-widest mb-1 text-black/60">
+                The fix
+              </div>
+
+              <p className="text-xs leading-snug">
+                Run 3 copies. They vote on a "leader" that handles writes and
+                copies them to the others. A majority must agree before any
+                write is confirmed.
+              </p>
+            </div>
+
+            {/* Below */}
+            <div className="border-2 border-black p-3 bg-[#F2ECDC]">
+              <div className="mono text-[10px] uppercase tracking-widest mb-1 text-black/60">
+                Below
+              </div>
+
+              <p className="text-xs leading-snug">
+                3 live nodes below. Kill the leader and watch the cluster heal
+                itself in real time — no data lost.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Tour */}
         {showTour && (
-          <div className="brutal-box-sm p-3 mb-6 bg-[#E8A33D] text-sm flex items-start justify-between gap-3">
-            <p>
-              <b>TRY IT:</b> run{" "}
-              <code className="mono bg-white px-1 border border-black">
-                SET name akshay
-              </code>{" "}
-              in the terminal below, then hit <b>Kill</b> on whichever node is
-              gold (the leader). A new leader is elected in about a second —
-              your data survives.
-            </p>
+          <div className="brutal-box-sm p-4 mb-6 bg-[#E8A33D] text-sm">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <p className="font-bold uppercase mono text-xs">
+                Try it yourself — 3 steps
+              </p>
 
-            <button
-              onClick={() => setShowTour(false)}
-              className="mono text-xs underline shrink-0"
-            >
-              dismiss
-            </button>
+              <button
+                onClick={() => setShowTour(false)}
+                className="mono text-xs underline shrink-0"
+              >
+                dismiss
+              </button>
+            </div>
+
+            <ol className="space-y-1.5 list-none">
+              <li className="flex gap-2">
+                <span className="mono font-bold">1.</span>
+
+                <span>
+                  In the <b>Terminal</b> below, type{" "}
+                  <code className="mono bg-white px-1 border border-black">
+                    SET name akshay
+                  </code>{" "}
+                  and press Enter.
+                </span>
+              </li>
+
+              <li className="flex gap-2">
+                <span className="mono font-bold">2.</span>
+
+                <span>
+                  Find the node with the <b>👑 gold "LEADER" stamp</b> and click
+                  its <b>Kill</b> button.
+                </span>
+              </li>
+
+              <li className="flex gap-2">
+                <span className="mono font-bold">3.</span>
+
+                <span>
+                  Watch a different node become leader within ~1 second. Now
+                  type{" "}
+                  <code className="mono bg-white px-1 border border-black">
+                    GET name
+                  </code>{" "}
+                  — your data is still there, even though a server "died."
+                </span>
+              </li>
+            </ol>
           </div>
         )}
+
+        {/* Node section heading */}
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="mono text-xs uppercase tracking-widest text-black/60">
+            Live Cluster — 3 Nodes
+          </h3>
+
+          <span className="mono text-[10px] text-black/40">
+            updates every 300ms
+          </span>
+        </div>
 
         {/* Node cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -115,7 +220,6 @@ export default function App() {
             </h2>
 
             <div className="flex flex-wrap gap-2 mb-4">
-
               {/* Partition */}
               <button
                 onClick={() => {
@@ -177,7 +281,8 @@ export default function App() {
         {/* Footer */}
         <p className="text-center mono text-[11px] text-black/50">
           simulation mode: nodes run in one process over a simulated network —
-          same raft code as the real multi-process cluster.
+          same raft code as the real multi-process cluster. built from scratch,
+          no consensus libraries used.
         </p>
       </div>
     </div>
